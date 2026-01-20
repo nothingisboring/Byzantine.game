@@ -1,25 +1,421 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <title>React Game</title>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Byzantine - Luminous Maze</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Bungee+Shade&family=Inter:wght@400;700;900&family=Playfair+Display:ital,900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        /* Restore and enforce Bungee Shade */
+        .bungee-title { 
+            font-family: 'Bungee Shade', cursive !important; 
+            text-transform: uppercase;
+        }
+        .serif-italic { font-family: 'Playfair Display', serif; font-style: italic; }
+        
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-4px); }
+            40% { transform: translateX(4px); }
+            60% { transform: translateX(-4px); }
+            80% { transform: translateX(4px); }
+        }
+        .animate-shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
 
-    <!-- React -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+        @keyframes descend {
+            from { height: 0%; }
+            to { height: 100%; }
+        }
+        .animate-descend { animation: descend 1.5s ease-out forwards; }
 
-    <!-- Babel -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  </head>
-  <body>
-    <div id="root"></div>
+        @keyframes spin-slow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow { animation: spin-slow 8s linear infinite; }
 
-    <script type="text/babel">
-      function Game() {
-        return <h1>My Game</h1>;
-      }
+        .glass-hud {
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen overflow-hidden">
+    <!-- Dynamic Mesh Background -->
+    <div class="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+        <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-200/40 blur-[120px] rounded-full animate-pulse"></div>
+        <div class="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-200/40 blur-[120px] rounded-full animate-pulse" style="animation-delay: 2s;"></div>
+        <div class="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-pink-100/30 blur-[100px] rounded-full"></div>
+    </div>
 
-      ReactDOM.createRoot(document.getElementById("root")).render(<Game />);
+    <div id="glitch-overlay" class="fixed inset-0 z-[60] pointer-events-none bg-red-500/20 opacity-0 transition-opacity duration-300"></div>
+
+    <!-- App Container -->
+    <div id="app" class="flex flex-col items-center h-screen transition-all duration-500">
+        
+        <!-- Glass HUD -->
+        <div class="w-full max-w-2xl px-6 py-4 flex justify-between items-center border-b border-white/40 glass-hud z-50 shadow-sm">
+            <div class="flex flex-col">
+                <h1 class="text-2xl md:text-4xl font-normal tracking-tighter leading-none text-indigo-700 bungee-title">
+                    BYZANTINE
+                </h1>
+                <span class="text-[8px] md:text-[9px] uppercase tracking-[0.3em] text-slate-500 font-bold mt-1">Luminous Maze Navigation</span>
+            </div>
+            
+            <div class="flex items-center gap-4 md:gap-6">
+                <div id="life-meters" class="flex gap-1 md:gap-1.5">
+                    <!-- Lives injected here -->
+                </div>
+                <div class="text-right border-l border-slate-200 pl-4">
+                    <div class="text-[8px] uppercase text-slate-400 font-bold">Progress</div>
+                    <div id="progress-text" class="text-base md:text-lg font-black leading-none text-slate-800">0/7</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Floating Answer Bar -->
+        <div class="w-full max-w-lg mt-6 px-4 z-40">
+            <div id="selection-bar" class="transition-all duration-300 border border-white/80 p-3 md:p-4 flex flex-col items-center bg-white/60 backdrop-blur-2xl rounded-[2rem] shadow-xl">
+                <div id="selection-content" class="flex flex-wrap justify-center gap-1.5 md:gap-2 min-h-[40px] items-center">
+                    <p id="status-message" class="text-xs md:text-sm font-medium flex items-center gap-2 text-slate-500">
+                        <i data-lucide="zap" class="w-4 h-4 text-indigo-500"></i>
+                        Unlock the sequence to proceed.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- The Maze Viewport -->
+        <div id="maze-container" class="flex-1 w-full overflow-y-auto px-4 py-8 md:py-12 scroll-smooth no-scrollbar relative">
+            <div class="max-w-2xl mx-auto flex flex-col items-center relative" id="maze-rows-wrapper">
+                <div class="absolute top-0 bottom-0 w-px bg-gradient-to-b from-indigo-500/20 via-slate-200 to-transparent left-1/2 -translate-x-1/2 z-0"></div>
+                <!-- Rows injected here -->
+            </div>
+        </div>
+
+        <!-- Fixed Controls -->
+        <div class="fixed bottom-6 left-6 z-50 flex gap-4">
+            <button onclick="resetSelection()" id="reset-btn" class="w-12 h-12 md:w-14 md:h-14 bg-white/80 text-slate-600 rounded-full border border-white shadow-xl backdrop-blur-md flex items-center justify-center hover:bg-white active:scale-95 transition-all">
+                <i data-lucide="rotate-cw" class="w-5 h-5"></i>
+            </button>
+            <button onclick="toggleHelp(true)" class="w-12 h-12 md:w-14 md:h-14 bg-white/80 text-slate-600 rounded-full border border-white shadow-xl backdrop-blur-md flex items-center justify-center hover:bg-white active:scale-95 transition-all">
+                <i data-lucide="help-circle" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <button onclick="triggerHint()" id="hint-btn" class="fixed bottom-6 right-6 z-50 h-12 md:h-14 px-6 md:px-8 bg-indigo-600 text-white rounded-full font-bold shadow-2xl flex items-center gap-3 active:scale-95 transition-all backdrop-blur-md border border-white/40">
+            <i data-lucide="lightbulb" class="w-5 h-5"></i>
+            <span class="text-sm md:text-base">Hint</span>
+        </button>
+
+        <!-- Modals -->
+        <div id="help-modal" class="fixed inset-0 z-[100] hidden items-center justify-center p-4 bg-indigo-900/10 backdrop-blur-md">
+            <div class="w-full max-w-md bg-white/90 p-6 md:p-8 rounded-[2.5rem] border border-white shadow-2xl">
+                <h3 class="text-xl md:text-2xl font-black italic mb-6 text-indigo-900 flex items-center gap-2 serif-italic">
+                    SEQUENCE GUIDE
+                </h3>
+                <div id="help-list" class="space-y-2 md:space-y-3 max-h-[40vh] overflow-y-auto pr-2 no-scrollbar">
+                    <!-- List items here -->
+                </div>
+                <button onclick="toggleHelp(false)" class="w-full mt-6 md:mt-8 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl shadow-indigo-200 hover:bg-indigo-700 transition-all">
+                    RETURN TO MAZE
+                </button>
+            </div>
+        </div>
+
+        <div id="end-modal" class="fixed inset-0 z-[200] hidden bg-white/60 backdrop-blur-2xl items-center justify-center p-4">
+            <div class="text-center max-w-sm p-10 bg-white rounded-[3rem] shadow-2xl border border-white">
+                <div id="end-icon-container" class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6"></div>
+                <h2 id="end-title" class="text-4xl font-black italic mb-4 text-slate-800 serif-italic"></h2>
+                <p id="end-message" class="text-slate-500 mb-10"></p>
+                <button onclick="location.reload()" class="w-full py-5 bg-indigo-600 text-white font-black rounded-3xl text-xl shadow-xl shadow-indigo-200 hover:scale-105 transition-all">
+                    Play Again
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const PUZZLE_SEQUENCE = [
+            { id: 1, clue: "GAME", answer: "MEGA" },
+            { id: 2, clue: "MY TEA", answer: "MATEY" },
+            { id: 3, clue: "ORBITS", answer: "BISTRO" },
+            { id: 4, clue: "CURRIES", answer: "CRUISER" },
+            { id: 5, clue: "KING SNOT", answer: "STONKING" },
+            { id: 6, clue: "MS GRANITE", answer: "MASTERING" },
+            { id: 7, clue: "CASTING ROOM", answer: "GASTRONOMIC" }
+        ];
+
+        const MAX_GLITCHES = 4;
+        let glitches = 0;
+        let selection = [];
+        let solvedRowIds = new Set();
+        let isGlitching = false;
+        let hintLevel = 0;
+
+        function init() {
+            renderLives();
+            renderMaze();
+            lucide.createIcons();
+        }
+
+        function renderLives() {
+            const container = document.getElementById('life-meters');
+            container.innerHTML = '';
+            for (let i = 0; i < MAX_GLITCHES; i++) {
+                const meter = document.createElement('div');
+                meter.className = `h-1.5 w-5 md:w-6 rounded-full transition-all duration-500 ${i < MAX_GLITCHES - glitches ? 'bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.4)]' : 'bg-slate-300/50'}`;
+                container.appendChild(meter);
+            }
+        }
+
+        function renderMaze() {
+            const wrapper = document.getElementById('maze-rows-wrapper');
+            // Keep the center line
+            const line = wrapper.querySelector('div');
+            wrapper.innerHTML = '';
+            wrapper.appendChild(line);
+
+            PUZZLE_SEQUENCE.forEach((p, idx) => {
+                const isSolved = solvedRowIds.has(p.id);
+                const isLocked = !isSolved && solvedRowIds.size < idx;
+                const isActive = solvedRowIds.size === idx;
+                const alignment = idx % 2 === 0 ? 'left' : 'right';
+
+                const rowDiv = document.createElement('div');
+                rowDiv.className = `relative w-full mb-16 md:mb-24 transition-all duration-700 flex flex-col
+                    ${isLocked ? 'opacity-30 blur-sm pointer-events-none scale-95' : 'opacity-100 blur-0 scale-100'}
+                    ${alignment === 'left' ? 'items-start md:pl-12' : 'items-end md:pr-12'}`;
+                
+                const letters = isSolved ? p.answer.replace(/\s/g, '').split('') : p.clue.replace(/\s/g, '').split('');
+
+                rowDiv.innerHTML = `
+                    <div class="flex items-center gap-2 mb-4 ${alignment === 'left' ? 'flex-row' : 'flex-row-reverse'}">
+                        <div class="w-7 h-7 md:w-9 md:h-9 rounded-full border-2 flex items-center justify-center font-black text-[10px] md:text-xs transition-all
+                            ${isSolved ? 'bg-emerald-500 border-emerald-500 text-white' : isActive ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white/50 border-slate-200 text-slate-400'}">
+                            ${idx + 1}
+                        </div>
+                        <span class="text-[8px] md:text-[10px] font-bold tracking-widest uppercase transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-400'}">
+                            ${isSolved ? 'Sequence Verified' : isActive ? 'Active Matrix' : 'Incoming Layer'}
+                        </span>
+                    </div>
+                    <div class="w-full flex ${alignment === 'right' ? 'justify-end' : 'justify-start'}">
+                        <div class="flex flex-row gap-2 md:gap-3 w-full max-w-[98%] md:max-w-[85%] ${alignment === 'right' ? 'justify-end' : 'justify-start'}" id="row-tiles-${idx}">
+                        </div>
+                    </div>
+                    <div class="mt-4 serif-italic text-sm md:text-base ${isSolved ? 'text-emerald-600 font-bold' : 'text-slate-400'} ${alignment === 'left' ? 'pl-2' : 'pr-2'}">
+                        ${isSolved ? p.answer : p.clue}
+                    </div>
+                `;
+
+                if (idx < PUZZLE_SEQUENCE.length - 1) {
+                    const lineConnector = document.createElement('div');
+                    lineConnector.className = "absolute -bottom-16 md:-bottom-24 w-px h-16 md:h-24 bg-slate-200 left-1/2 -translate-x-1/2";
+                    if (isSolved) {
+                        lineConnector.innerHTML = `<div class="absolute top-0 w-full bg-indigo-500 animate-descend h-full"></div>`;
+                    }
+                    rowDiv.appendChild(lineConnector);
+                }
+
+                wrapper.appendChild(rowDiv);
+
+                // Render tiles
+                const tilesContainer = document.getElementById(`row-tiles-${idx}`);
+                letters.forEach((char, colIdx) => {
+                    const btn = document.createElement('button');
+                    const isSelected = selection.some(s => s.rowIdx === idx && s.colIdx === colIdx);
+                    
+                    btn.className = `relative flex-1 aspect-[4/5] max-w-[64px] min-w-0 flex items-center justify-center text-xl md:text-2xl font-black rounded-xl transition-all duration-300 border-2
+                        ${isSolved ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' 
+                        : isSelected ? 'bg-indigo-600 text-white border-indigo-400 shadow-xl -translate-y-1' 
+                        : 'bg-white/80 border-white text-slate-600 hover:bg-white hover:border-indigo-100'}`;
+                    
+                    btn.innerText = char.toUpperCase();
+                    btn.onclick = () => handleTileClick(idx, colIdx);
+                    tilesContainer.appendChild(btn);
+                });
+            });
+        }
+
+        function handleTileClick(rowIdx, colIdx) {
+            if (isGlitching || solvedRowIds.size < rowIdx || solvedRowIds.has(PUZZLE_SEQUENCE[rowIdx].id)) return;
+
+            const existingIndex = selection.findIndex(s => s.rowIdx === rowIdx && s.colIdx === colIdx);
+            if (existingIndex !== -1) {
+                if (existingIndex === selection.length - 1) selection.pop();
+                else selection = [];
+            } else {
+                selection.push({ rowIdx, colIdx });
+            }
+            updateSelectionUI();
+            checkSequence();
+        }
+
+        function updateSelectionUI() {
+            const content = document.getElementById('selection-content');
+            if (selection.length === 0) {
+                content.innerHTML = `<p id="status-message" class="text-xs md:text-sm font-medium flex items-center gap-2 text-slate-500">
+                    <i data-lucide="zap" class="w-4 h-4 text-indigo-500"></i>
+                    Unlock the sequence to proceed.
+                </p>`;
+                lucide.createIcons();
+                return;
+            }
+
+            content.innerHTML = '';
+            selection.forEach(pos => {
+                const char = PUZZLE_SEQUENCE[pos.rowIdx].clue.replace(/\s/g, '')[pos.colIdx];
+                const tile = document.createElement('div');
+                tile.className = "w-8 h-10 md:w-9 md:h-11 flex items-center justify-center font-black rounded-xl text-lg animate-in zoom-in-75 bg-indigo-600 text-white shadow-sm";
+                tile.innerText = char.toUpperCase();
+                content.appendChild(tile);
+            });
+        }
+
+        function checkSequence() {
+            if (selection.length === 0) return;
+            const currentRowIdx = solvedRowIds.size;
+            const currentString = selection.map(pos => PUZZLE_SEQUENCE[pos.rowIdx].clue.replace(/\s/g, '')[pos.colIdx].toUpperCase()).join('');
+            const targetAnswer = PUZZLE_SEQUENCE[currentRowIdx].answer.replace(/\s/g, '').toUpperCase();
+
+            if (currentString === targetAnswer) {
+                handleCorrectSolve(PUZZLE_SEQUENCE[currentRowIdx]);
+            } else if (selection.length >= targetAnswer.length || !targetAnswer.startsWith(currentString)) {
+                handleIncorrectAttempt();
+            }
+        }
+
+        function handleCorrectSolve(word) {
+            solvedRowIds.add(word.id);
+            selection = [];
+            hintLevel = 0;
+            document.getElementById('progress-text').innerText = `${solvedRowIds.size}/7`;
+            updateSelectionUI();
+            renderMaze();
+            
+            if (solvedRowIds.size === PUZZLE_SEQUENCE.length) {
+                setTimeout(() => showEnd(true), 1000);
+            }
+        }
+
+        function handleIncorrectAttempt() {
+            isGlitching = true;
+            glitches++;
+            renderLives();
+            
+            const overlay = document.getElementById('glitch-overlay');
+            const bar = document.getElementById('selection-bar');
+            overlay.style.opacity = '1';
+            bar.classList.add('bg-red-100/80', 'border-red-300', 'animate-shake');
+            
+            if (glitches >= MAX_GLITCHES) {
+                setTimeout(() => showEnd(false), 600);
+                return;
+            }
+
+            setTimeout(() => {
+                isGlitching = false;
+                selection = [];
+                overlay.style.opacity = '0';
+                bar.classList.remove('bg-red-100/80', 'border-red-300', 'animate-shake');
+                updateSelectionUI();
+            }, 600);
+        }
+
+        function triggerHint() {
+            if (isGlitching || solvedRowIds.size === PUZZLE_SEQUENCE.length) return;
+            
+            const currentRowIdx = solvedRowIds.size;
+            const targetAnswer = PUZZLE_SEQUENCE[currentRowIdx].answer.replace(/\s/g, '').toUpperCase();
+            const nextChar = targetAnswer[selection.length];
+            
+            const clueChars = PUZZLE_SEQUENCE[currentRowIdx].clue.replace(/\s/g, '').toUpperCase();
+            const tileIdx = clueChars.split('').findIndex((c, i) => 
+                c === nextChar && !selection.some(s => s.rowIdx === currentRowIdx && s.colIdx === i)
+            );
+
+            if (tileIdx !== -1) {
+                if (currentRowIdx >= 3 || hintLevel > 0) {
+                    glitches++;
+                    renderLives();
+                    if (glitches >= MAX_GLITCHES) {
+                        showEnd(false);
+                        return;
+                    }
+                }
+                hintLevel++;
+                
+                // Highlight the specific tile temporarily
+                const rows = document.getElementById('maze-rows-wrapper').children;
+                const currentRow = rows[currentRowIdx + 1]; // +1 because of line div
+                const tiles = currentRow.querySelector(`#row-tiles-${currentRowIdx}`).children;
+                const targetTile = tiles[tileIdx];
+                
+                targetTile.classList.add('bg-amber-100', 'border-amber-400', 'scale-110', 'z-10');
+                setTimeout(() => {
+                    targetTile.classList.remove('bg-amber-100', 'border-amber-400', 'scale-110', 'z-10');
+                }, 2000);
+            }
+        }
+
+        function resetSelection() {
+            selection = [];
+            updateSelectionUI();
+        }
+
+        function toggleHelp(show) {
+            const modal = document.getElementById('help-modal');
+            modal.style.display = show ? 'flex' : 'none';
+            if (show) {
+                const list = document.getElementById('help-list');
+                list.innerHTML = '';
+                PUZZLE_SEQUENCE.forEach((p, i) => {
+                    const isSolved = solvedRowIds.has(p.id);
+                    const item = document.createElement('div');
+                    item.className = `flex justify-between items-center p-4 rounded-2xl border transition-all ${isSolved ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100'}`;
+                    item.innerHTML = `
+                        <div class="flex flex-col">
+                            <span class="text-[8px] md:text-[10px] uppercase font-bold text-slate-400 mb-0.5">Floor ${i+1}</span>
+                            <span class="text-base md:text-lg serif-italic ${isSolved ? 'text-emerald-600 line-through' : 'text-slate-700'}">${p.clue}</span>
+                        </div>
+                        <i data-lucide="${isSolved ? 'sparkles' : 'help-circle'}" class="w-4 h-4 ${isSolved ? 'text-emerald-500' : 'text-slate-300'}"></i>
+                    `;
+                    list.appendChild(item);
+                });
+                lucide.createIcons();
+            }
+        }
+
+        function showEnd(victory) {
+            const modal = document.getElementById('end-modal');
+            const icon = document.getElementById('end-icon-container');
+            modal.style.display = 'flex';
+            
+            document.getElementById('end-title').innerText = victory ? 'Illuminated.' : 'Static.';
+            document.getElementById('end-message').innerText = victory 
+                ? "You've solved the Byzantine maze and restored the signal." 
+                : "The signal has faded. Try reconnecting.";
+            
+            icon.className = `w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 ${victory ? 'bg-emerald-100' : 'bg-red-100'}`;
+            icon.innerHTML = `<i data-lucide="${victory ? 'sparkles' : 'alert-circle'}" class="w-12 h-12 ${victory ? 'text-emerald-600 animate-spin-slow' : 'text-red-600'}"></i>`;
+            lucide.createIcons();
+        }
+
+        window.onload = init;
     </script>
-  </body>
+</body>
 </html>
