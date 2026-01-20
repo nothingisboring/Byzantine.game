@@ -1,0 +1,446 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { RotateCw, Sparkles, HelpCircle, Zap, AlertCircle, ChevronDown, Lightbulb } from 'lucide-react';
+
+// To support daily puzzles, you can create a library of sequences
+// and use (new Date().getDate() % PUZZLE_LIBRARY.length) to pick one.
+const PUZZLE_SEQUENCE = [
+  { id: 1, clue: "GAME", answer: "MEGA" },
+  { id: 2, clue: "MY TEA", answer: "MATEY" },
+  { id: 3, clue: "ORBITS", answer: "BISTRO" },
+  { id: 4, clue: "CURRIES", answer: "CRUISER" },
+  { id: 5, clue: "KING SNOT", answer: "STONKING" },
+  { id: 6, clue: "MS GRANITE", answer: "MASTERING" },
+  { id: 7, clue: "CASTING ROOM", answer: "GASTRONOMIC" }
+];
+
+const MAX_GLITCHES = 4;
+
+const App = () => {
+  const [mazeRows, setMazeRows] = useState([]);
+  const [selection, setSelection] = useState([]); 
+  const [solvedRowIds, setSolvedRowIds] = useState(new Set());
+  const [glitches, setGlitches] = useState(0);
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [isVictory, setIsVictory] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [message, setMessage] = useState("Unlock the sequence to proceed.");
+  const [isGlitching, setIsGlitching] = useState(false);
+  const [hintLevel, setHintLevel] = useState(0); 
+  const [hintActive, setHintActive] = useState(null); 
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    // Inject Google Font
+    const link = document.createElement('link');
+    link.href = 'https://fonts.googleapis.com/css2?family=Bungee+Shade&display=swap';
+    link.rel = 'stylesheet';
+    document.head.appendChild(link);
+
+    const initialRows = PUZZLE_SEQUENCE.map((p, idx) => ({
+      id: p.id,
+      clue: p.clue,
+      answer: p.answer,
+      alignment: idx % 2 === 0 ? 'left' : 'right',
+      letters: p.clue.replace(/\s/g, '').split('').map((char, i) => ({
+        char: char.toUpperCase(),
+        isSolved: false,
+        id: `${p.id}-${i}`,
+        originalIndex: i
+      }))
+    }));
+    setMazeRows(initialRows);
+  }, []);
+
+  useEffect(() => {
+    if (selection.length === 0) return;
+
+    const currentString = selection.map(pos => mazeRows[pos.rowIdx].letters[pos.colIdx].char).join('');
+    const matchedWord = PUZZLE_SEQUENCE.find(p => 
+        !solvedRowIds.has(p.id) && 
+        p.answer.replace(/\s/g, '').toUpperCase() === currentString
+    );
+
+    if (matchedWord) {
+        handleCorrectSolve(matchedWord);
+        return;
+    }
+
+    const currentLen = selection.length;
+    const unsolvedWords = PUZZLE_SEQUENCE.filter(p => !solvedRowIds.has(p.id));
+    const targetLengths = unsolvedWords.map(p => p.answer.replace(/\s/g, '').length);
+
+    if (targetLengths.includes(currentLen)) {
+        const isPrefixOfSomething = unsolvedWords.some(p => 
+            p.answer.replace(/\s/g, '').toUpperCase().startsWith(currentString)
+        );
+        if (!isPrefixOfSomething) handleIncorrectAttempt();
+    }
+  }, [selection, mazeRows, solvedRowIds]);
+
+  const handleIncorrectAttempt = () => {
+    setIsGlitching(true);
+    setGlitches(prev => {
+        const next = prev + 1;
+        if (next >= MAX_GLITCHES) setIsGameOver(true);
+        return next;
+    });
+    
+    setMessage("SEQUENCE REJECTED");
+    
+    setTimeout(() => {
+        setIsGlitching(false);
+        setSelection([]);
+        setMessage("Try a different combination.");
+    }, 600);
+  };
+
+  const handleCorrectSolve = (word) => {
+    setMazeRows(prevRows => prevRows.map(row => {
+        if (row.id === word.id) {
+            return {
+                ...row,
+                letters: word.answer.replace(/\s/g, '').split('').map((char, i) => ({
+                    char: char.toUpperCase(),
+                    isSolved: true,
+                    id: `${word.id}-solved-${i}`
+                }))
+            };
+        }
+        return row;
+    }));
+    
+    const newSolvedIds = new Set([...solvedRowIds, word.id]);
+    setSolvedRowIds(newSolvedIds);
+    setSelection([]);
+    setHintLevel(0);
+    setMessage(`"${word.answer}" confirmed.`);
+
+    if (newSolvedIds.size === PUZZLE_SEQUENCE.length) {
+        setTimeout(() => {
+            setIsVictory(true);
+        }, 1200);
+    }
+  };
+
+  const handleTileClick = (rowIdx, colIdx) => {
+    const isNextAvailableRow = solvedRowIds.size >= rowIdx;
+    if (mazeRows[rowIdx].letters[colIdx].isSolved || isGameOver || isVictory || !isNextAvailableRow || isGlitching) return;
+
+    const existingIndex = selection.findIndex(s => s.rowIdx === rowIdx && s.colIdx === colIdx);
+    if (existingIndex !== -1) {
+        if (existingIndex === selection.length - 1) setSelection(selection.slice(0, -1));
+        else setSelection([]);
+    } else {
+        setSelection([...selection, { rowIdx, colIdx }]);
+    }
+    setHintActive(null); 
+  };
+
+  const triggerHint = () => {
+    if (isGlitching || isGameOver || isVictory || solvedRowIds.size === PUZZLE_SEQUENCE.length) return;
+    
+    const currentRowIdx = solvedRowIds.size;
+    const currentRow = mazeRows[currentRowIdx];
+    const targetAnswer = currentRow.answer.replace(/\s/g, '').toUpperCase();
+    
+    const nextCharIndex = selection.length;
+    if (nextCharIndex >= targetAnswer.length) return;
+    
+    const charToFind = targetAnswer[nextCharIndex];
+    
+    const tileColIdx = currentRow.letters.findIndex((l, idx) => {
+        const alreadySelected = selection.some(s => s.rowIdx === currentRowIdx && s.colIdx === idx);
+        return l.char === charToFind && !alreadySelected;
+    });
+
+    if (tileColIdx !== -1) {
+        const isAdvancedLevel = (currentRowIdx + 1) >= 4;
+        const costsLife = isAdvancedLevel || hintLevel >= 1;
+
+        if (costsLife) {
+            setGlitches(prev => {
+                const next = prev + 1;
+                if (next >= MAX_GLITCHES) setIsGameOver(true);
+                return next;
+            });
+            setMessage("HINT COST: 1 LIFE");
+        } else {
+            setMessage("FIRST HINT FREE");
+        }
+        
+        setHintLevel(prev => prev + 1);
+        setHintActive({ rowIdx: currentRowIdx, colIdx: tileColIdx });
+        
+        setTimeout(() => setHintActive(null), 2000);
+    }
+  };
+
+  const allSolved = solvedRowIds.size === PUZZLE_SEQUENCE.length;
+
+  return (
+    <div className={`min-h-screen transition-all duration-500 flex flex-col items-center select-none font-sans overflow-hidden ${isGlitching ? 'bg-red-500/20' : 'bg-slate-50'}`}>
+      
+      {/* Dynamic Mesh Background */}
+      <div className="fixed inset-0 -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-200/40 blur-[120px] rounded-full animate-pulse" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-200/40 blur-[120px] rounded-full animate-pulse" style={{ animationDelay: '2s' }} />
+        <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-pink-100/30 blur-[100px] rounded-full" />
+      </div>
+
+      {isGlitching && (
+        <div className="fixed inset-0 z-[60] pointer-events-none bg-red-500/20 animate-pulse backdrop-blur-[2px]" />
+      )}
+
+      {/* Glass HUD */}
+      <div className="w-full max-w-2xl px-6 py-4 flex justify-between items-center border-b border-white/40 bg-white/30 backdrop-blur-xl z-50 shadow-sm">
+        <div className="flex flex-col">
+          <h1 className="text-2xl md:text-4xl font-normal tracking-tighter leading-none text-indigo-700 uppercase" style={{ fontFamily: "'Bungee Shade', cursive" }}>
+            BYZANTINE
+          </h1>
+          <span className="text-[8px] md:text-[9px] uppercase tracking-[0.3em] text-slate-500 font-bold mt-1">Luminous Maze Navigation</span>
+        </div>
+        
+        <div className="flex items-center gap-4 md:gap-6">
+          <div className="flex gap-1 md:gap-1.5">
+            {[...Array(MAX_GLITCHES)].map((_, i) => (
+              <div key={i} className={`h-1.5 w-5 md:w-6 rounded-full transition-all duration-500 ${i < MAX_GLITCHES - glitches ? 'bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.4)]' : 'bg-slate-300/50'}`} />
+            ))}
+          </div>
+          <div className="text-right border-l border-slate-200 pl-4">
+            <div className="text-[8px] uppercase text-slate-400 font-bold">Progress</div>
+            <div className="text-base md:text-lg font-black leading-none text-slate-800">{solvedRowIds.size}/{PUZZLE_SEQUENCE.length}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating Glass Answer Bar */}
+      <div className="w-full max-w-lg mt-6 px-4 z-40">
+        <div className={`transition-all duration-300 border p-3 md:p-4 flex flex-col items-center backdrop-blur-2xl rounded-[2rem] shadow-xl ${isGlitching ? 'bg-red-100/80 border-red-300 animate-shake scale-105' : 'bg-white/60 border-white/80'}`}>
+          <div className="flex flex-wrap justify-center gap-1.5 md:gap-2 min-h-[40px]">
+            {selection.length > 0 ? (
+              selection.map((pos, idx) => (
+                <div key={idx} className={`w-8 h-10 md:w-9 md:h-11 flex items-center justify-center font-black rounded-xl text-lg animate-in zoom-in-75 transition-all shadow-sm ${isGlitching ? 'bg-red-500 text-white' : 'bg-indigo-600 text-white'}`}>
+                  {mazeRows[pos.rowIdx].letters[pos.colIdx].char}
+                </div>
+              ))
+            ) : (
+              <p className={`text-xs md:text-sm font-medium flex items-center gap-2 transition-colors ${isGlitching ? 'text-red-600' : 'text-slate-500'}`}>
+                <Zap size={14} className={isGlitching || glitches > 0 ? 'text-orange-500' : 'text-indigo-500'} />
+                {message}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* The Maze Viewport */}
+      <div className="flex-1 w-full overflow-y-auto px-4 py-8 md:py-12 scroll-smooth no-scrollbar" ref={scrollRef}>
+        <div className="max-w-2xl mx-auto flex flex-col items-center relative">
+          
+          <div className="absolute top-0 bottom-0 w-px bg-gradient-to-b from-indigo-500/20 via-slate-200 to-transparent left-1/2 -translate-x-1/2 z-0" />
+
+          {mazeRows.map((row, rowIdx) => {
+            const isSolved = solvedRowIds.has(row.id);
+            const isLocked = !isSolved && solvedRowIds.size < rowIdx;
+            const isActive = solvedRowIds.size === rowIdx;
+
+            return (
+              <div 
+                key={row.id} 
+                className={`relative w-full mb-16 md:mb-24 transition-all duration-700 flex flex-col
+                  ${isLocked ? 'opacity-30 blur-sm pointer-events-none scale-95' : 'opacity-100 blur-0 scale-100'}
+                  ${row.alignment === 'left' ? 'items-start md:pl-12' : 'items-end md:pr-12'}
+                  ${isGlitching && isActive ? 'animate-shake' : ''}
+                `}
+              >
+                <div className={`flex items-center gap-2 mb-4 ${row.alignment === 'left' ? 'flex-row' : 'flex-row-reverse'}`}>
+                    <div className={`w-7 h-7 md:w-9 md:h-9 rounded-full border-2 flex items-center justify-center font-black text-[10px] md:text-xs transition-all
+                        ${isSolved ? 'bg-emerald-500 border-emerald-500 text-white' : isActive ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white/50 border-slate-200 text-slate-400'}`}>
+                        {rowIdx + 1}
+                    </div>
+                    <span className={`text-[8px] md:text-[10px] font-bold tracking-widest uppercase transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-400'}`}>
+                        {isSolved ? 'Sequence Verified' : isActive ? 'Active Matrix' : 'Incoming Layer'}
+                    </span>
+                </div>
+
+                <div className={`w-full flex ${row.alignment === 'right' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex flex-row gap-2 md:gap-3 w-full max-w-[98%] md:max-w-[85%] ${row.alignment === 'right' ? 'justify-end' : 'justify-start'}`}>
+                        {row.letters.map((letter, colIdx) => {
+                            const isSelected = selection.some(s => s.rowIdx === rowIdx && s.colIdx === colIdx);
+                            const isHinted = hintActive?.rowIdx === rowIdx && hintActive?.colIdx === colIdx;
+
+                            return (
+                                <button
+                                    key={letter.id}
+                                    onClick={() => handleTileClick(rowIdx, colIdx)}
+                                    className={`
+                                        relative flex-1 aspect-[4/5] max-w-[64px] min-w-0 flex items-center justify-center text-xl md:text-2xl font-black rounded-xl transition-all duration-300 border-2
+                                        ${letter.isSolved 
+                                            ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' 
+                                            : isSelected 
+                                            ? (isGlitching ? 'bg-red-500 text-white border-red-500 shadow-lg' : 'bg-indigo-600 text-white border-indigo-400 shadow-xl -translate-y-1') 
+                                            : isHinted 
+                                            ? 'bg-amber-100 border-amber-400 text-amber-700 shadow-[0_0_20px_rgba(251,191,36,0.6)] scale-110 z-10'
+                                            : 'bg-white/80 border-white text-slate-600 hover:bg-white hover:border-indigo-100 hover:shadow-md'
+                                        }
+                                    `}
+                                >
+                                    <span className="truncate">{letter.char}</span>
+                                    {!letter.isSolved && isSelected && (
+                                        <div className="absolute inset-x-0 bottom-1 h-1 flex justify-center gap-1 opacity-50">
+                                            <div className="w-1 h-1 rounded-full bg-current" />
+                                        </div>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                <div className={`mt-4 font-serif italic text-sm md:text-base ${isSolved ? 'text-emerald-600 font-bold' : 'text-slate-400'} ${row.alignment === 'left' ? 'pl-2' : 'pr-2'}`}>
+                    {isSolved ? row.answer : row.clue}
+                </div>
+
+                {rowIdx < mazeRows.length - 1 && (
+                    <div className={`absolute -bottom-16 md:-bottom-24 w-px h-16 md:h-24 bg-slate-200 left-1/2 -translate-x-1/2`}>
+                        {isSolved && <div className="absolute top-0 w-full bg-indigo-500 animate-descend" style={{ height: '100%' }} />}
+                    </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Fixed UI - Control Bar & Floating Hint */}
+      <div className="fixed bottom-6 left-6 z-50 flex gap-4">
+        <button 
+          onClick={() => setSelection([])}
+          disabled={isGlitching || selection.length === 0 || isVictory}
+          className="w-12 h-12 md:w-14 md:h-14 bg-white/80 text-slate-600 rounded-full border border-white shadow-xl backdrop-blur-md flex items-center justify-center hover:bg-white active:scale-95 transition-all disabled:opacity-30"
+          title="Reset sequence"
+        >
+          <RotateCw className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={() => setShowHelp(true)}
+          className="w-12 h-12 md:w-14 md:h-14 bg-white/80 text-slate-600 rounded-full border border-white shadow-xl backdrop-blur-md flex items-center justify-center hover:bg-white active:scale-95 transition-all"
+        >
+          <HelpCircle className="w-5 h-5" />
+        </button>
+      </div>
+
+      <button 
+        onClick={triggerHint}
+        disabled={isGlitching || isGameOver || isVictory || allSolved}
+        className={`fixed bottom-6 right-6 z-50 h-12 md:h-14 px-6 md:px-8 rounded-full font-bold shadow-2xl flex items-center gap-3 active:scale-95 transition-all disabled:opacity-50 backdrop-blur-md border border-white/40
+          ${(solvedRowIds.size + 1 >= 4 || hintLevel > 0) ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white'}
+        `}
+      >
+        <Lightbulb className={`w-5 h-5 ${(solvedRowIds.size + 1 >= 4 || hintLevel > 0) ? 'fill-current' : ''}`} />
+        <span className="text-sm md:text-base">Hint</span>
+        {(solvedRowIds.size + 1 >= 4 || hintLevel >= 1) && (
+            <span className="text-[10px] bg-black/20 px-2 py-0.5 rounded-full">-1 ❤️</span>
+        )}
+      </button>
+
+      {/* Glass Modals */}
+      {showHelp && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-indigo-900/10 backdrop-blur-md" onClick={() => setShowHelp(false)}>
+          <div className="w-full max-w-md bg-white/90 p-6 md:p-8 rounded-[2.5rem] border border-white shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl md:text-2xl font-black italic mb-6 text-indigo-900 flex items-center gap-2">
+                <ChevronDown className="text-indigo-500" /> SEQUENCE GUIDE
+            </h3>
+            <div className="space-y-2 md:space-y-3 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+              {PUZZLE_SEQUENCE.map((p, i) => (
+                <div key={i} className={`flex justify-between items-center p-4 rounded-2xl border transition-all ${solvedRowIds.has(p.id) ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100'}`}>
+                  <div className="flex flex-col">
+                    <span className="text-[8px] md:text-[10px] uppercase font-bold text-slate-400 mb-0.5">Floor {i+1}</span>
+                    <span className={`text-base md:text-lg font-serif ${solvedRowIds.has(p.id) ? 'text-emerald-600 line-through' : 'text-slate-700'}`}>
+                        {p.clue}
+                    </span>
+                  </div>
+                  {solvedRowIds.has(p.id) ? <Sparkles size={16} className="text-emerald-500" /> : <HelpCircle size={16} className="text-slate-300" />}
+                </div>
+              ))}
+            </div>
+            <button 
+              onClick={() => setShowHelp(false)}
+              className="w-full mt-6 md:mt-8 py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-xl shadow-indigo-200 hover:bg-indigo-700 transition-all"
+            >
+              RETURN TO MAZE
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(isGameOver || isVictory) && (
+        <div className="fixed inset-0 z-[200] bg-white/60 backdrop-blur-2xl flex items-center justify-center p-4 animate-in fade-in duration-700">
+          <div className="text-center max-w-sm p-10 bg-white rounded-[3rem] shadow-2xl border border-white scale-in duration-300">
+            {isVictory ? (
+              <>
+                <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Sparkles className="w-12 h-12 text-emerald-600 animate-spin-slow" />
+                </div>
+                <h2 className="text-4xl font-serif font-black italic mb-4 text-slate-800">Illuminated.</h2>
+                <p className="text-slate-500 mb-10">You've solved the Byzantine maze and restored the signal.</p>
+              </>
+            ) : (
+              <>
+                <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <AlertCircle className="w-12 h-12 text-red-600" />
+                </div>
+                <h2 className="text-4xl font-serif font-black italic mb-4 text-slate-800">Static.</h2>
+                <p className="text-slate-500 mb-10">The signal has faded. Try reconnecting.</p>
+              </>
+            )}
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-5 bg-indigo-600 text-white font-black rounded-3xl text-xl shadow-xl shadow-indigo-200 hover:scale-105 transition-all"
+            >
+              {isVictory ? 'Begin Anew' : 'Try Again'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-4px); }
+          40% { transform: translateX(4px); }
+          60% { transform: translateX(-4px); }
+          80% { transform: translateX(4px); }
+        }
+        .animate-shake {
+          animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes descend {
+            from { height: 0%; }
+            to { height: 100%; }
+        }
+        .animate-descend {
+            animation: descend 1.5s ease-out forwards;
+        }
+
+        @keyframes spin-slow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+          animation: spin-slow 8s linear infinite;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.05); border-radius: 10px; }
+      `}</style>
+    </div>
+  );
+};
+
+export default App;
